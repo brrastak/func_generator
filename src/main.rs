@@ -4,7 +4,10 @@
 
 
 use cortex_m::singleton;
-use embedded_hal::pwm::SetDutyCycle;
+use embedded_hal::{
+    pwm::SetDutyCycle,
+    delay::DelayNs,
+};
 use waveshare_rp2040_zero as rp;
 use embedded_hal::digital::OutputPin;
 use hal::{
@@ -25,7 +28,7 @@ use smart_leds::{SmartLedsWrite, RGB8};
 use ws2812_pio::Ws2812;
 
 
-systick_monotonic!(Mono, 1000);
+systick_monotonic!(Mono, 100_000);
 
 
 
@@ -51,6 +54,7 @@ mod app {
         rgb_led: RgbLed,
         duty_receiver: Receiver<'static, u16, 1>,
         alarm_timer: Timer,
+        idle_pin: gpio::Pin<gpio::bank0::Gpio29, gpio::FunctionSio<gpio::SioOutput>, gpio::PullDown>,
     }
 
     #[init]
@@ -113,6 +117,9 @@ mod app {
         alarm.schedule(100.micros()).ok();
         alarm.enable_interrupt();
 
+        // Configure pin to observe idle time
+        let idle_pin = pins.gp29.into_push_pull_output();
+
 
         // New duty cycle value
         let (duty_sender, duty_receiver) = make_channel!(u16, 1);
@@ -129,6 +136,7 @@ mod app {
                 rgb_led,
                 duty_receiver,
                 alarm_timer,
+                idle_pin
             },
         )
     }
@@ -189,11 +197,18 @@ mod app {
     }
 
 
-    #[idle]
-    fn idle(_: idle::Context) -> ! {
+    #[idle(local = [idle_pin])]
+    fn idle(cx: idle::Context) -> ! {
+
+        let idle::LocalResources
+            {idle_pin, ..} = cx.local;
 
         loop {
-            continue;
+            idle_pin.set_low().unwrap();
+            Mono.delay_us(20);
+
+            idle_pin.set_high().unwrap();
+            Mono.delay_us(20);
         }
     }
 }

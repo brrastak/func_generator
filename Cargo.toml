@@ -1,0 +1,39 @@
+[package]
+name = "func_generator"
+version = "0.1.0"
+authors = ["Yuri Volkov <volkov.yuri.alex@gmail.com>"]
+edition = "2024"
+
+[dependencies]
+panic-halt = "1.0.0"
+portable-atomic = {version = "1.12.0", features = ["critical-section"]}
+cortex-m = "0.7.7"
+embedded-hal = "1.0.0"
+cortex-m-rt = "0.7.5"
+rtic = {version = "2.2.0", features = ["thumbv6-backend"]}
+rtic-monotonics = {version = "2.1.0", features = ["cortex-m-systick"]}
+rtic-sync = "1.4.0"
+waveshare-rp2040-zero = "0.8.0"
+smart-leds = "0.4.0"
+ws2812-pio = "0.9.0"
+
+
+[patch.crates-io]
+# rp2040-hal v0.11.0
+waveshare-rp2040-zero = {git = "https://github.com/Tommypop2/rp-hal-boards.git", branch = "main"}
+
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+
+
+# Set the default for dependencies.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+codegen-units = 1
+incremental = false
+debug = true
+lto = true
+opt-level = 3

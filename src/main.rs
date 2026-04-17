@@ -36,9 +36,9 @@ mod app {
 
 
     type RgbLed = Ws2812<hal::pac::PIO0, hal::pio::SM0, hal::timer::CountDown, hal::gpio::Pin<hal::gpio::bank0::Gpio16, hal::gpio::FunctionPio0, hal::gpio::PullDown>>;
-    type Pwm = hal::pwm::Slice<hal::pwm::Pwm0, hal::pwm::FreeRunning>;
+    type Pwm = hal::pwm::Slice<hal::pwm::Pwm4, hal::pwm::FreeRunning>;
     type PwmAlarm = hal::timer::Alarm0;
-    type PwmChannel = &'static mut hal::pwm::Channel<hal::pwm::Slice<hal::pwm::Pwm0, hal::pwm::FreeRunning>, hal::pwm::A>;
+    type PwmChannel = &'static mut hal::pwm::Channel<hal::pwm::Slice<hal::pwm::Pwm4, hal::pwm::FreeRunning>, hal::pwm::A>;
 
 
     #[shared]
@@ -80,7 +80,7 @@ mod app {
 
         Mono::start(cx.core.SYST, clocks.system_clock.freq().to_Hz());
 
-        let out = pins.gp0.into_push_pull_output();
+        let out = pins.gp8.into_push_pull_output();
 
         // Configure timer
         // For RGB LED
@@ -101,7 +101,7 @@ mod app {
         // Configure the PWM for the generator output
         let pwm_slices = hal::pwm::Slices::new(cx.device.PWM, &mut resets);
 
-        let pwm: &'static mut _ = singleton!(: Pwm = pwm_slices.pwm0).unwrap();
+        let pwm: &'static mut _ = singleton!(: Pwm = pwm_slices.pwm4).unwrap();
         pwm.set_ph_correct();
         pwm.enable();
 

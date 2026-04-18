@@ -3,16 +3,10 @@
 #![no_std]
 
 
-use embedded_hal::{
-    pwm::SetDutyCycle,
-    delay::DelayNs,
-};
+use embedded_hal::pwm::SetDutyCycle;
 use waveshare_rp2040_zero as rp;
-use embedded_hal::digital::OutputPin;
 use hal::{
     clocks::{init_clocks_and_plls, Clock},
-    fugit::{RateExtU32, TimerInstantU64},
-    gpio,
     pio::PIOExt,
     Sio,
     timer::Timer,
@@ -25,6 +19,8 @@ use rtic_monotonics::systick::prelude::*;
 use rtic_sync::{channel::*, make_channel};
 use smart_leds::{SmartLedsWrite, RGB8};
 use ws2812_pio::Ws2812;
+
+use func_generator::generator::SinGenerator;
 
 
 systick_monotonic!(Mono, 100_000);
@@ -49,7 +45,6 @@ mod app {
         pwm: Pwm,
         duty_receiver: Receiver<'static, u16, 1>,
         rgb_led: RgbLed,
-        idle_pin: gpio::Pin<gpio::bank0::Gpio29, gpio::FunctionSio<gpio::SioOutput>, gpio::PullDown>,
     }
 
     #[init]
@@ -102,10 +97,6 @@ mod app {
         pwm.enable();
         pwm.enable_interrupt();
 
-        // Configure pin to observe idle time
-        let idle_pin = pins.gp29.into_push_pull_output();
-
-
         // New duty cycle value
         let (duty_sender, duty_receiver) = make_channel!(u16, 1);
 
@@ -119,7 +110,6 @@ mod app {
                 pwm,
                 duty_receiver,
                 rgb_led,
-                idle_pin
             },
         )
     }
@@ -129,13 +119,18 @@ mod app {
     #[task(priority = 1)]
     async fn generate(_cx: generate::Context, mut duty_sender: Sender<'static, u16, 1>) {
 
+        // 50Hz
+        let signal_period: fugit::Duration<u32, 1, 1_000_000> = 20.millis();
+        let pwm_period: fugit::Duration<u32, 1, 1_000_000> = 20.micros();
+        let max_duty_value = 1200.0;
+
+        let generator = SinGenerator::new(signal_period, pwm_period, max_duty_value).unwrap();
+        let values = generator.get_values();
+
         loop {
-
-            duty_sender.send(500).await.ok();
-            Mono::delay(1000.millis()).await;
-
-            duty_sender.send(0).await.ok();
-            Mono::delay(1000.millis()).await;
+            for value in &values {
+                duty_sender.send(*value).await.ok();
+            }
         }
     }
 
@@ -176,18 +171,12 @@ mod app {
     }
 
 
-    #[idle(local = [idle_pin])]
-    fn idle(cx: idle::Context) -> ! {
-
-        let idle::LocalResources
-            {idle_pin, ..} = cx.local;
+    #[idle()]
+    fn idle(_: idle::Context) -> ! {
 
         loop {
-            idle_pin.set_low().unwrap();
-            Mono.delay_us(20);
 
-            idle_pin.set_high().unwrap();
-            Mono.delay_us(20);
+            continue;
         }
     }
 }

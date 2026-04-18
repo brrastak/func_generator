@@ -3,7 +3,6 @@
 #![no_std]
 
 
-use cortex_m::singleton;
 use embedded_hal::{
     pwm::SetDutyCycle,
     delay::DelayNs,
@@ -16,7 +15,7 @@ use hal::{
     gpio,
     pio::PIOExt,
     Sio,
-    timer::{Timer, Alarm},
+    timer::Timer,
     Watchdog,
 };
 use panic_halt as _;
@@ -40,8 +39,6 @@ mod app {
 
     type RgbLed = Ws2812<hal::pac::PIO0, hal::pio::SM0, hal::timer::CountDown, hal::gpio::Pin<hal::gpio::bank0::Gpio16, hal::gpio::FunctionPio0, hal::gpio::PullDown>>;
     type Pwm = hal::pwm::Slice<hal::pwm::Pwm4, hal::pwm::FreeRunning>;
-    type PwmAlarm = hal::timer::Alarm0;
-    type PwmChannel = &'static mut hal::pwm::Channel<hal::pwm::Slice<hal::pwm::Pwm4, hal::pwm::FreeRunning>, hal::pwm::A>;
 
 
     #[shared]
@@ -49,11 +46,9 @@ mod app {
 
     #[local]
     struct Local {
-        alarm: PwmAlarm,
-        channel: PwmChannel,
-        rgb_led: RgbLed,
+        pwm: Pwm,
         duty_receiver: Receiver<'static, u16, 1>,
-        alarm_timer: Timer,
+        rgb_led: RgbLed,
         idle_pin: gpio::Pin<gpio::bank0::Gpio29, gpio::FunctionSio<gpio::SioOutput>, gpio::PullDown>,
     }
 
@@ -84,15 +79,8 @@ mod app {
 
         Mono::start(cx.core.SYST, clocks.system_clock.freq().to_Hz());
 
-        let out = pins.gp8.into_push_pull_output();
-
-        // Configure timer
-        // For RGB LED
-        let delay = Timer::new(cx.device.TIMER, &mut resets, &clocks);
-        // For PWM adjust period
-        let mut alarm_timer = delay.clone();
-
         // Configure the addressable LED
+        let delay = Timer::new(cx.device.TIMER, &mut resets, &clocks);
         let (mut pio, sm0, _, _, _) = cx.device.PIO0.split(&mut resets);
         let rgb_led = Ws2812::new(
             pins.neopixel.into_function(),
@@ -104,18 +92,15 @@ mod app {
 
         // Configure the PWM for the generator output
         let pwm_slices = hal::pwm::Slices::new(cx.device.PWM, &mut resets);
-
-        let pwm: &'static mut _ = singleton!(: Pwm = pwm_slices.pwm4).unwrap();
+        let mut pwm = pwm_slices.pwm4;
         pwm.set_ph_correct();
+        let out = pins.gp8.into_push_pull_output();
+        pwm.channel_a.output_to(out);
+        pwm.set_div_int(1);
+        // PWM frequency = 50 kHz
+        pwm.set_top(1250);
         pwm.enable();
-
-        let channel = &mut pwm.channel_a;
-        channel.output_to(out);
-
-        // Update the PWM duty cycle every 100 us
-        let mut alarm = alarm_timer.alarm_0().unwrap();
-        alarm.schedule(100.micros()).ok();
-        alarm.enable_interrupt();
+        pwm.enable_interrupt();
 
         // Configure pin to observe idle time
         let idle_pin = pins.gp29.into_push_pull_output();
@@ -131,11 +116,9 @@ mod app {
         (
             Shared {},
             Local {
-                alarm,
-                channel,
-                rgb_led,
+                pwm,
                 duty_receiver,
-                alarm_timer,
+                rgb_led,
                 idle_pin
             },
         )
@@ -148,7 +131,7 @@ mod app {
 
         loop {
 
-            duty_sender.send(32768).await.ok();
+            duty_sender.send(500).await.ok();
             Mono::delay(1000.millis()).await;
 
             duty_sender.send(0).await.ok();
@@ -157,22 +140,18 @@ mod app {
     }
 
 
-    // Update PWM duty cycle every 100 us
-    #[task(binds = TIMER_IRQ_0, local = [alarm, channel, alarm_timer, duty_receiver], priority = 1)]
+    // Update PWM duty cycle every 20 us
+    #[task(binds = PWM_IRQ_WRAP, local = [pwm, duty_receiver], priority = 1)]
     fn update_pwm(cx: update_pwm::Context) {
 
         let update_pwm::LocalResources
-            {alarm, channel, alarm_timer, duty_receiver, ..} = cx.local;
-
-        let now = alarm_timer.get_counter();
-        alarm.clear_interrupt();
+            {pwm, duty_receiver, ..} = cx.local;
 
         if let Ok(duty_value) = duty_receiver.try_recv() {
-            channel.set_duty_cycle(duty_value).unwrap();
+            pwm.channel_a.set_duty_cycle(duty_value).unwrap();
         }
 
-        let next = now + 100.micros();
-        alarm.schedule_at(next).ok();
+        pwm.clear_interrupt();
     }
 
 
